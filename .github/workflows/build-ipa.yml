@@ -1,0 +1,52 @@
+name: Build IPA
+
+on:
+  push:
+    branches: [main]
+    paths: ["app/**", ".github/workflows/build-ipa.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate Xcode project
+        working-directory: app
+        run: |
+          brew install xcodegen
+          xcodegen generate
+
+      - name: Build unsigned app
+        working-directory: app
+        run: |
+          xcodebuild -project SnapWeb.xcodeproj -scheme SnapWeb -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build \
+            CURRENT_PROJECT_VERSION=${{ github.run_number }} \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            build
+
+      # Sideloadly / AltStore / SideStore sign it with your Apple ID on install.
+      - name: Package IPA
+        run: |
+          mkdir Payload
+          cp -R app/build/Build/Products/Release-iphoneos/SnapWeb.app Payload/
+          zip -qry SnapWeb.ipa Payload
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SnapWeb.ipa
+          path: SnapWeb.ipa
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "build-${{ github.run_number }}" SnapWeb.ipa \
+            --title "Snap Web build ${{ github.run_number }}" \
+            --notes "Unsigned IPA. Install with Sideloadly, AltStore or SideStore." \
+            --latest
